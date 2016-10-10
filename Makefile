@@ -25,7 +25,8 @@ SDK_BASE	?= /Volumes/Crosstool/esp/esp_iot_sdk_v1.2.0
 
 # esptool.py path and port
 ESPTOOL		?= /Volumes/Crosstool/esp/esptool.py
-ESPPORT		?= /dev/tty.wchusbserial1410
+ESPPORT1	?= /dev/tty.wchusbserial1410
+ESPPORT2	?= /dev/tty.wchusbserial1420
 
 # name for the target project
 TARGET		= app
@@ -60,6 +61,15 @@ FW_FILE_2_ADDR	= 0x40000
 CC		:= $(XTENSA_TOOLS_ROOT)/xtensa-lx106-elf-gcc
 AR		:= $(XTENSA_TOOLS_ROOT)/xtensa-lx106-elf-ar
 LD		:= $(XTENSA_TOOLS_ROOT)/xtensa-lx106-elf-gcc
+
+
+# build for AP or Station
+ifdef AP
+ESPPORT 	= $(ESPPORT1)
+CFLAGS 		+= -DAP
+else
+ESPPORT 	= $(ESPPORT2)
+endif
 
 
 
