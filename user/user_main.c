@@ -2,7 +2,6 @@
 #include <osapi.h>
 #include <gpio.h>
 #include <os_type.h>
-#include <pwm.h>
 #include <ip_addr.h>
 #include <espconn.h>
 #include <user_interface.h>
@@ -20,10 +19,13 @@ struct espconn connsend;
 esp_udp udpsend;
 struct espconn connrecv;
 esp_udp udprecv;
-os_timer_t tmr_1s;
+os_timer_t tmr_1ms;
+bool sync=false;
+int sync_counter=0;
 
 void init_done_cb (void) 
 {
+	// Initialisation is done. System is ready.
 	os_printf("SDK version: %s\n",system_get_sdk_version());
 
 	// Setup WIFI
@@ -43,6 +45,8 @@ void init_done_cb (void)
 
     // Setup GPIO2 to output mode
     PIN_FUNC_SELECT(PERIPHS_IO_MUX_GPIO2_U, FUNC_GPIO2);
+
+	blink_led(1);
 }
 
 void wifi_event_cb (System_Event_t *evt) 
@@ -72,10 +76,37 @@ void wifi_event_cb (System_Event_t *evt)
 //	        os_printf("\n");
 			{
 #ifdef MASTER
-			    os_timer_disarm(&tmr_1s);
-			    os_timer_setfn(&tmr_1s, (os_timer_func_t *)timer_cb, NULL);
-			    os_timer_arm(&tmr_1s, 1000, 1);
+				struct ip_info ip;
+				wifi_get_ip_info(STATION_IF, &ip);
+				//os_printf("IP:" IPSTR ", MASK:" IPSTR ", GATEWAY:" IPSTR "\n", IP2STR(&(ip.ip)),IP2STR(&(ip.netmask)),IP2STR(&(ip.gw)));
+				uint32 bcast_ip = ip.ip.addr | ~(ip.netmask.addr);
+				//os_printf("Broadcast IP:" IPSTR "\n", IP2STR(&bcast_ip));
+	
+				// Send a UDP message
+				connsend.type = ESPCONN_UDP;
+				connsend.state = ESPCONN_NONE;
+				connsend.proto.udp = &udpsend;
+				udpsend.remote_ip[3] = bcast_ip>>24;
+				udpsend.remote_ip[2] = (bcast_ip>>16) & 0xFF;
+				udpsend.remote_ip[1] = (bcast_ip>>8) & 0xFF;
+				udpsend.remote_ip[0] = bcast_ip & 0xFF;
+				udpsend.remote_port = MCPORT;
+				espconn_regist_sentcb(&connsend, sent_cb);
+
+				// Wait at UDP port
+				connrecv.type = ESPCONN_UDP;
+				connrecv.state = ESPCONN_NONE;
+				connrecv.proto.udp = &udprecv;
+				udprecv.local_port = MCPORT+1;
+				espconn_regist_recvcb(&connrecv, received_cb);
+				espconn_create(&connrecv);
 #else
+				// Prepare for sending UDP message
+				connsend.type = ESPCONN_UDP;
+				connsend.state = ESPCONN_NONE;
+				connsend.proto.udp = &udpsend;
+				espconn_regist_sentcb(&connsend, sent_cb);
+
 				// Wait at UDP port
 				connrecv.type = ESPCONN_UDP;
 				connrecv.state = ESPCONN_NONE;
@@ -84,20 +115,29 @@ void wifi_event_cb (System_Event_t *evt)
 				espconn_regist_recvcb(&connrecv, received_cb);
 				espconn_create(&connrecv);
 #endif
+				// Set timer
+			    os_timer_disarm(&tmr_1ms);
+			    os_timer_setfn(&tmr_1ms, (os_timer_func_t *)timer_cb, NULL);
+			    os_timer_arm(&tmr_1ms, 1, 1);
+				//hw_timer_init(FRC1_SOURCE,1);
+				//hw_timer_set_func(timer_cb);
+				//hw_timer_arm(1000);
 			}
-
 			blink_led(2);
 	        break;
+
 	    case EVENT_SOFTAPMODE_STACONNECTED:
 //	        os_printf("station: " MACSTR "join, AID = %d\n",
 //                MAC2STR(evt->event_info.sta_connected.mac),	
 //				evt->event_info.sta_connected.aid);
 			break;
+
 		case EVENT_SOFTAPMODE_STADISCONNECTED:
 //		    os_printf("station: " MACSTR "leave, AID = %d\n",
 //	        MAC2STR(evt->event_info.sta_disconnected.mac),
 //			    evt->event_info.sta_disconnected.aid);
 		    break;
+
 		default:
 			break;
 	}
@@ -105,50 +145,66 @@ void wifi_event_cb (System_Event_t *evt)
 
 void sent_cb (void *arg)
 {
-	struct espconn *conn = arg;
-	esp_udp *udp = conn->proto.udp;
-	os_printf("Sent [Status=%d]\n",conn->state);
-	os_printf("Local  " IPSTR ":%d\n",IP2STR(udp->local_ip),udp->local_port);
-	os_printf("Remote " IPSTR ":%d\n",IP2STR(udp->remote_ip),udp->remote_port);
+//	struct espconn *conn = arg;
+//	esp_udp *udp = conn->proto.udp;
+//	os_printf("Sent [Status=%d]\n",conn->state);
+//	os_printf("Local  " IPSTR ":%d\n",IP2STR(udp->local_ip),udp->local_port);
+//	os_printf("Remote " IPSTR ":%d\n",IP2STR(udp->remote_ip),udp->remote_port);
+
+	os_printf("SENT - %10d\n",sync_counter);
+
 }
 
 void received_cb (void *arg, char *pdata, unsigned short len) 
 {
-	struct espconn *conn = arg;
-	esp_udp *udp = conn->proto.udp;
-	os_printf("Received [Status=%d]\n",conn->state);
-	os_printf("Local  IP:" IPSTR ", Port:%d\n",udp->local_ip,udp->local_port);
-	os_printf("Remote IP:" IPSTR ", Port:%d\n",udp->remote_ip,udp->remote_port);
+//	struct espconn *conn = arg;
+//	esp_udp *udp = conn->proto.udp;
+//	os_printf("Received [Status=%d]\n",conn->state);
+//	os_printf("Local  IP:" IPSTR ", Port:%d\n",udp->local_ip,udp->local_port);
+//	os_printf("Remote IP:" IPSTR ", Port:%d\n",udp->remote_ip,udp->remote_port);
 	
-	int i;
-	for (i=0; i<len; i++)
-		os_printf("%c",pdata[i]);
-	os_printf("\n");
+//	int i;
+//	for (i=0; i<len; i++)
+//		os_printf("%c",pdata[i]);
+//	os_printf("\n");
+	
+#ifdef MASTER
+	os_printf("%10d %s\n",sync_counter,pdata);
+#else
+	if (!sync) {
+		sync_counter = 0;
+		sync = true;
+	} else {
+		struct espconn *conn = (struct espconn *)arg;
+		int i = atoi(pdata);
+		udpsend.remote_ip[3] = conn->proto.udp->remote_ip[3];
+		udpsend.remote_ip[2] = conn->proto.udp->remote_ip[2];
+		udpsend.remote_ip[1] = conn->proto.udp->remote_ip[1];
+		udpsend.remote_ip[0] = conn->proto.udp->remote_ip[0];
+		udpsend.remote_port = MCPORT + 1;
+		espconn_create(&connsend);
+		espconn_sent(&connsend,pdata,len);
+		espconn_delete(&connsend);
+		os_printf("%10d %10d\n",i,sync_counter);
+	}
+#endif
+	//blink_led(1);
 }
 
 void timer_cb (void *arg)
 {
+	if ((sync_counter%1000)==0) {
 #ifdef MASTER
-	struct ip_info ip;
-	wifi_get_ip_info(STATION_IF, &ip);
-	os_printf("IP:" IPSTR ", MASK:" IPSTR ", GATEWAY:" IPSTR "\n", IP2STR(&(ip.ip)),IP2STR(&(ip.netmask)),IP2STR(&(ip.gw)));
-	uint32 bcast_ip = ip.ip.addr | ~(ip.netmask.addr);
-	os_printf("Broadcast IP:" IPSTR "\n", IP2STR(&bcast_ip));
-	
-	// Send a UDP message
-	connsend.type = ESPCONN_UDP;
-	connsend.state = ESPCONN_NONE;
-	connsend.proto.udp = &udpsend;
-	udpsend.remote_ip[3] = bcast_ip>>24;
-	udpsend.remote_ip[2] = (bcast_ip>>16) & 0xFF;
-	udpsend.remote_ip[1] = (bcast_ip>>8) & 0xFF;
-	udpsend.remote_ip[0] = bcast_ip & 0xFF;
-	udpsend.remote_port = MCPORT;
-	espconn_regist_sentcb(&connsend, sent_cb);
-	espconn_create(&connsend);
-	espconn_sent(&connsend,"Hello World\0",12);
-	espconn_delete(&connsend);
+		// Send message to Station
+		char buffer[10];
+		os_sprintf(buffer,"%9d\0",sync_counter);
+		espconn_create(&connsend);
+		espconn_sent(&connsend,buffer,10);
+		espconn_delete(&connsend);
 #endif
+		blink_led(1);
+	}
+	sync_counter++;
 }
 
 void user_rf_pre_init(void) 

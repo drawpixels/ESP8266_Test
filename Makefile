@@ -138,7 +138,7 @@ $(BUILD_DIR):
 $(FW_BASE):
 	$(Q) mkdir -p $@
 
-flash: $(FW_FILE_1) $(FW_FILE_2)
+flash: checkdirs $(FW_FILE_1) $(FW_FILE_2)
 	$(Q) export PATH=$(XTENSA_TOOLS_ROOT):$(PATH); $(ESPTOOL) --port $(ESPPORT) write_flash $(FW_FILE_1_ADDR) $(FW_FILE_1) $(FW_FILE_2_ADDR) $(FW_FILE_2)
 
 clean:
