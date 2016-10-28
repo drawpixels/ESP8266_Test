@@ -31,17 +31,29 @@ void init_done_cb (void)
 	// Setup WIFI
 #ifdef MASTER
 	char hostname[] = "MASTER";
+	// Define our mode as an Access Point
+	wifi_set_opmode_current(SOFTAP_MODE);
+	// Build our Access Point configuration details
+	struct softap_config config;
+	os_strcpy(config.ssid, SSID);
+	os_strcpy(config.password, PASSWORD);
+	config.ssid_len = 0;
+	config.authmode = AUTH_WPA2_PSK;
+	config.ssid_hidden = 0;
+	config.max_connection = 4;
+	wifi_softap_set_config_current(&config);
+	wifi_set_event_handler_cb(wifi_event_cb);
 #else
 	char hostname[] = "STATION";
-#endif
 	wifi_set_opmode_current(STATION_MODE);
 	wifi_station_set_hostname(hostname);
 	struct station_config config;
 	strncpy(config.ssid, SSID, 32);
 	strncpy(config.password, PASSWORD, 64);
 	wifi_station_set_config(&config);
-	wifi_set_event_handler_cb(wifi_event_cb);
 	wifi_station_connect();
+	wifi_set_event_handler_cb(wifi_event_cb);
+#endif
 
     // Setup GPIO2 to output mode
     PIN_FUNC_SELECT(PERIPHS_IO_MUX_GPIO2_U, FUNC_GPIO2);
@@ -54,52 +66,28 @@ void wifi_event_cb (System_Event_t *evt)
 	os_printf("event %x\n", evt->event);
     switch (evt->event) {
 	    case EVENT_STAMODE_CONNECTED:
-//	        os_printf("connect to ssid %s, channel %d\n",
-//	            evt->event_info.connected.ssid,
-//	            evt->event_info.connected.channel);
+	        os_printf("connect to ssid %s, channel %d\n",
+	            evt->event_info.connected.ssid,
+	            evt->event_info.connected.channel);
 	        break;
 	    case EVENT_STAMODE_DISCONNECTED:
-//	        os_printf("disconnect from ssid %s, reason %d\n",
-//	            evt->event_info.disconnected.ssid,
-//	            evt->event_info.disconnected.reason);
+	        os_printf("disconnect from ssid %s, reason %d\n",
+	            evt->event_info.disconnected.ssid,
+	            evt->event_info.disconnected.reason);
 	        break;
 	    case EVENT_STAMODE_AUTHMODE_CHANGE:
-//	        os_printf("mode: %d -> %d\n",
-//	            evt->event_info.auth_change.old_mode,
-//	            evt->event_info.auth_change.new_mode);
+	        os_printf("mode: %d -> %d\n",
+	            evt->event_info.auth_change.old_mode,
+	            evt->event_info.auth_change.new_mode);
 	        break;
 	    case EVENT_STAMODE_GOT_IP:
-//            os_printf("ip:" IPSTR ",mask:" IPSTR ",gw:" IPSTR,
-//	            IP2STR(&evt->event_info.got_ip.ip),
-//	            IP2STR(&evt->event_info.got_ip.mask),
-//	            IP2STR(&evt->event_info.got_ip.gw));
-//	        os_printf("\n");
+            os_printf("ip:" IPSTR ",mask:" IPSTR ",gw:" IPSTR,
+	            IP2STR(&evt->event_info.got_ip.ip),
+	            IP2STR(&evt->event_info.got_ip.mask),
+	            IP2STR(&evt->event_info.got_ip.gw));
+	        os_printf("\n");
 			{
 #ifdef MASTER
-				struct ip_info ip;
-				wifi_get_ip_info(STATION_IF, &ip);
-				//os_printf("IP:" IPSTR ", MASK:" IPSTR ", GATEWAY:" IPSTR "\n", IP2STR(&(ip.ip)),IP2STR(&(ip.netmask)),IP2STR(&(ip.gw)));
-				uint32 bcast_ip = ip.ip.addr | ~(ip.netmask.addr);
-				//os_printf("Broadcast IP:" IPSTR "\n", IP2STR(&bcast_ip));
-	
-				// Send a UDP message
-				connsend.type = ESPCONN_UDP;
-				connsend.state = ESPCONN_NONE;
-				connsend.proto.udp = &udpsend;
-				udpsend.remote_ip[3] = bcast_ip>>24;
-				udpsend.remote_ip[2] = (bcast_ip>>16) & 0xFF;
-				udpsend.remote_ip[1] = (bcast_ip>>8) & 0xFF;
-				udpsend.remote_ip[0] = bcast_ip & 0xFF;
-				udpsend.remote_port = MCPORT;
-				espconn_regist_sentcb(&connsend, sent_cb);
-
-				// Wait at UDP port
-				connrecv.type = ESPCONN_UDP;
-				connrecv.state = ESPCONN_NONE;
-				connrecv.proto.udp = &udprecv;
-				udprecv.local_port = MCPORT+1;
-				espconn_regist_recvcb(&connrecv, received_cb);
-				espconn_create(&connrecv);
 #else
 				// Prepare for sending UDP message
 				connsend.type = ESPCONN_UDP;
@@ -127,15 +115,49 @@ void wifi_event_cb (System_Event_t *evt)
 	        break;
 
 	    case EVENT_SOFTAPMODE_STACONNECTED:
-//	        os_printf("station: " MACSTR "join, AID = %d\n",
-//                MAC2STR(evt->event_info.sta_connected.mac),	
-//				evt->event_info.sta_connected.aid);
+	        os_printf("station: " MACSTR " join, AID = %d\n",
+                MAC2STR(evt->event_info.sta_connected.mac),	
+				evt->event_info.sta_connected.aid);
+#ifdef MASTER
+				struct ip_info ip;
+				wifi_get_ip_info(STATION_IF, &ip);
+				//os_printf("IP:" IPSTR ", MASK:" IPSTR ", GATEWAY:" IPSTR "\n", IP2STR(&(ip.ip)),IP2STR(&(ip.netmask)),IP2STR(&(ip.gw)));
+				uint32 bcast_ip = ip.ip.addr | ~(ip.netmask.addr);
+				//os_printf("Broadcast IP:" IPSTR "\n", IP2STR(&bcast_ip));
+	
+				// Send a UDP message
+				connsend.type = ESPCONN_UDP;
+				connsend.state = ESPCONN_NONE;
+				connsend.proto.udp = &udpsend;
+				udpsend.remote_ip[3] = bcast_ip>>24;
+				udpsend.remote_ip[2] = (bcast_ip>>16) & 0xFF;
+				udpsend.remote_ip[1] = (bcast_ip>>8) & 0xFF;
+				udpsend.remote_ip[0] = bcast_ip & 0xFF;
+				udpsend.remote_port = MCPORT;
+				espconn_regist_sentcb(&connsend, sent_cb);
+
+				// Wait at UDP port
+				connrecv.type = ESPCONN_UDP;
+				connrecv.state = ESPCONN_NONE;
+				connrecv.proto.udp = &udprecv;
+				udprecv.local_port = MCPORT+1;
+				espconn_regist_recvcb(&connrecv, received_cb);
+				espconn_create(&connrecv);
+				// Set timer
+			    os_timer_disarm(&tmr_1ms);
+			    os_timer_setfn(&tmr_1ms, (os_timer_func_t *)timer_cb, NULL);
+			    os_timer_arm(&tmr_1ms, 1, 1);
+				//hw_timer_init(FRC1_SOURCE,1);
+				//hw_timer_set_func(timer_cb);
+				//hw_timer_arm(1000);
+#else
+#endif
 			break;
 
 		case EVENT_SOFTAPMODE_STADISCONNECTED:
-//		    os_printf("station: " MACSTR "leave, AID = %d\n",
-//	        MAC2STR(evt->event_info.sta_disconnected.mac),
-//			    evt->event_info.sta_disconnected.aid);
+		    os_printf("station: " MACSTR " leave, AID = %d\n",
+	        MAC2STR(evt->event_info.sta_disconnected.mac),
+			    evt->event_info.sta_disconnected.aid);
 		    break;
 
 		default:
@@ -151,7 +173,7 @@ void sent_cb (void *arg)
 //	os_printf("Local  " IPSTR ":%d\n",IP2STR(udp->local_ip),udp->local_port);
 //	os_printf("Remote " IPSTR ":%d\n",IP2STR(udp->remote_ip),udp->remote_port);
 
-	os_printf("SENT - %10d\n",sync_counter);
+//	os_printf("SENT - %10d\n",sync_counter);
 
 }
 
@@ -186,6 +208,7 @@ void received_cb (void *arg, char *pdata, unsigned short len)
 		espconn_sent(&connsend,pdata,len);
 		espconn_delete(&connsend);
 		os_printf("%10d %10d\n",i,sync_counter);
+//		blink_led(1);
 	}
 #endif
 	//blink_led(1);
@@ -201,8 +224,9 @@ void timer_cb (void *arg)
 		espconn_create(&connsend);
 		espconn_sent(&connsend,buffer,10);
 		espconn_delete(&connsend);
+//		blink_led(1);
 #endif
-		blink_led(1);
+//		blink_led(1);
 	}
 	sync_counter++;
 }
@@ -228,10 +252,10 @@ user_init()
 void blink_led (int count) {
 	while (count>0) {
 	    gpio_output_set(0, BIT2, BIT2, 0);
-		os_delay_us(65000);
+		os_delay_us(50000);
 	    gpio_output_set(BIT2, 0, BIT2, 0);
 		if (--count>0) {
-			os_delay_us(65000);
+			os_delay_us(50000);
 		}
 	}
 }
