@@ -21,7 +21,9 @@ struct espconn connrecv;
 esp_udp udprecv;
 os_timer_t tmr_1ms;
 bool sync=false;
-int sync_counter=0;
+unsigned int sync_counter=0;
+unsigned int action_counter=0;
+bool action;
 
 void init_done_cb (void) 
 {
@@ -194,7 +196,7 @@ void received_cb (void *arg, char *pdata, unsigned short len)
 	os_printf("%10d %s\n",sync_counter,pdata);
 #else
 	if (!sync) {
-		sync_counter = 0;
+//		sync_counter = 0;
 		sync = true;
 	} else {
 		struct espconn *conn = (struct espconn *)arg;
@@ -208,6 +210,9 @@ void received_cb (void *arg, char *pdata, unsigned short len)
 		espconn_sent(&connsend,pdata,len);
 		espconn_delete(&connsend);
 		os_printf("%10d %10d\n",i,sync_counter);
+	    gpio_output_set(0, BIT2, BIT2, 0);
+		action_counter = sync_counter + 50;
+		action = false;
 //		blink_led(1);
 	}
 #endif
@@ -224,9 +229,18 @@ void timer_cb (void *arg)
 		espconn_create(&connsend);
 		espconn_sent(&connsend,buffer,10);
 		espconn_delete(&connsend);
+	    gpio_output_set(0, BIT2, BIT2, 0);
+		action_counter = sync_counter + 50;
+		action = false;
 //		blink_led(1);
 #endif
 //		blink_led(1);
+	}
+	if (sync_counter==action_counter) {
+		if (action)
+		    gpio_output_set(0, BIT2, BIT2, 0);
+		else
+		    gpio_output_set(BIT2, 0, BIT2, 0);
 	}
 	sync_counter++;
 }
