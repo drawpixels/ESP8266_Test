@@ -62,16 +62,7 @@ CC		:= $(XTENSA_TOOLS_ROOT)/xtensa-lx106-elf-gcc
 AR		:= $(XTENSA_TOOLS_ROOT)/xtensa-lx106-elf-ar
 LD		:= $(XTENSA_TOOLS_ROOT)/xtensa-lx106-elf-gcc
 
-
-# build for AP or Station
-ifdef MASTER
 ESPPORT 	= $(ESPPORT1)
-CFLAGS 		+= -DMASTER
-else
-ESPPORT 	= $(ESPPORT2)
-endif
-
-
 
 ####
 #### no user configurable options below here
