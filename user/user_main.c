@@ -1,190 +1,253 @@
-#include <ets_sys.h>
-#include <osapi.h>
-#include <gpio.h>
-#include <os_type.h>
-#include <ip_addr.h>
-#include <espconn.h>
-#include <user_interface.h>
-#include "user_config.h"
-
-void blink_led (int count);
-void init_done_cb (void);
-void wifi_event_cb (System_Event_t *evt);
-void sent_cb (void *arg);
-void recd_websrv_cb (void *arg, char *pdata, unsigned short len);
-
-// Need to define these as global variables so that they exist for the Callback functions
-struct espconn connwebsrv;
-esp_tcp tcpwebsrv;
-struct espconn connsend;
-esp_tcp tcpsend;
-
-int count = 0;
-
-void init_done_cb (void) 
+#include "ets_sys.h"
+#include "osapi.h"
+#include "user_interface.h"
+#include "espconn.h"
+ 
+LOCAL struct espconn esp_conn;
+LOCAL esp_tcp esptcp;
+ 
+#define SERVER_LOCAL_PORT   1112
+int counter = 0;
+ 
+/******************************************************************************
+ * FunctionName : tcp_server_sent_cb
+ * Description  : data sent callback.
+ * Parameters   : arg -- Additional argument to pass to the callback function
+ * Returns      : none
+*******************************************************************************/
+LOCAL void ICACHE_FLASH_ATTR
+tcp_server_sent_cb(void *arg)
 {
-	// Initialisation is done. System is ready.
-	os_printf("SDK version: %s\n",system_get_sdk_version());
-
-	// Setup WIFI
-	char hostname[] = "ESP";
-	wifi_set_opmode_current(STATION_MODE);
-	wifi_station_set_hostname(hostname);
-	struct station_config config;
-	strncpy(config.ssid, SSID, 32);
-	strncpy(config.password, PASSWORD, 64);
-	wifi_station_set_config(&config);
-	wifi_station_connect();
-	wifi_set_event_handler_cb(wifi_event_cb);
-
-    // Setup GPIO2 to output mode
-    PIN_FUNC_SELECT(PERIPHS_IO_MUX_GPIO2_U, FUNC_GPIO2);
-
-	blink_led(1);
-}
-
-void wifi_event_cb (System_Event_t *evt) 
-{
-	os_printf("event %x\n", evt->event);
-    switch (evt->event) {
-	    case EVENT_STAMODE_CONNECTED:
-	        os_printf("connect to ssid %s, channel %d\n",
-	            evt->event_info.connected.ssid,
-	            evt->event_info.connected.channel);
-	        break;
-	    case EVENT_STAMODE_DISCONNECTED:
-	        os_printf("disconnect from ssid %s, reason %d\n",
-	            evt->event_info.disconnected.ssid,
-	            evt->event_info.disconnected.reason);
-	        break;
-	    case EVENT_STAMODE_AUTHMODE_CHANGE:
-	        os_printf("mode: %d -> %d\n",
-	            evt->event_info.auth_change.old_mode,
-	            evt->event_info.auth_change.new_mode);
-	        break;
-	    case EVENT_STAMODE_GOT_IP:
-            os_printf("ip:" IPSTR ",mask:" IPSTR ",gw:" IPSTR,
-	            IP2STR(&evt->event_info.got_ip.ip),
-	            IP2STR(&evt->event_info.got_ip.mask),
-	            IP2STR(&evt->event_info.got_ip.gw));
-	        os_printf("\n");
-			
-			// Start Web server
-			connwebsrv.type = ESPCONN_TCP;
-			connwebsrv.state = ESPCONN_NONE;
-			connwebsrv.proto.tcp = &tcpwebsrv;
-			tcpwebsrv.local_port = 80;
-			espconn_regist_recvcb(&connwebsrv, recd_websrv_cb);
-			espconn_accept(&connwebsrv);
-			
-	        break;
-
-	    case EVENT_SOFTAPMODE_STACONNECTED:
-	        os_printf("station: " MACSTR " join, AID = %d\n",
-                MAC2STR(evt->event_info.sta_connected.mac),	
-				evt->event_info.sta_connected.aid);
-			break;
-
-		case EVENT_SOFTAPMODE_STADISCONNECTED:
-		    os_printf("station: " MACSTR " leave, AID = %d\n",
-	        MAC2STR(evt->event_info.sta_disconnected.mac),
-			    evt->event_info.sta_disconnected.aid);
-		    break;
-
-		default:
-			break;
-	}
-}
-
-void sent_cb (void *arg)
-{
-	struct espconn *conn = arg;
-	esp_udp *udp = conn->proto.udp;
-	os_printf("Sent [Status=%d]\n",conn->state);
-	os_printf("Local  " IPSTR ":%d\n",IP2STR(udp->local_ip),udp->local_port);
-	os_printf("Remote " IPSTR ":%d\n",IP2STR(udp->remote_ip),udp->remote_port);
-}
-
-void received_cb (void *arg, char *pdata, unsigned short len) 
-{
-	struct espconn *conn = arg;
-	esp_udp *udp = conn->proto.udp;
-	os_printf("Received [Status=%d]\n",conn->state);
-	os_printf("Local  IP:" IPSTR ", Port:%d\n",IP2STR(udp->local_ip),udp->local_port);
-	os_printf("Remote IP:" IPSTR ", Port:%d\n",IP2STR(udp->remote_ip),udp->remote_port);
-	os_printf("length = %d\n",len);
+   //data sent successfully
+ 
+    os_printf("tcp sent cb \r\n");
 	
-	int i;
-	for (i=0; i<len; i++)
-		os_printf("%c",pdata[i]);
-	os_printf("\n");
 }
-
-// Callback function for Web server
-void recd_websrv_cb (void *arg, char *pdata, unsigned short len) 
+ 
+ 
+/******************************************************************************
+ * FunctionName : tcp_server_recv_cb
+ * Description  : receive callback.
+ * Parameters   : arg -- Additional argument to pass to the callback function
+ * Returns      : none
+*******************************************************************************/
+LOCAL void ICACHE_FLASH_ATTR
+tcp_server_recv_cb(void *arg, char *pusrdata, unsigned short length)
 {
-	struct espconn *conn = arg;
-	esp_tcp *tcp = conn->proto.tcp;
-	os_printf("Received %s [Status=%d]\n",((conn->type==ESPCONN_TCP)?"TCP":"UDP"),conn->state);
-	os_printf("Local  IP:" IPSTR ", Port:%d\n",IP2STR(tcp->local_ip),tcp->local_port);
-	os_printf("Remote IP:" IPSTR ", Port:%d\n",IP2STR(tcp->remote_ip),tcp->remote_port);
-	os_printf("length = %d\n",len);
-	
-	int i;
-	for (i=0; i<len; i++)
-		os_printf("%c",pdata[i]);
-	os_printf("\n");
-	
-	// Respond with default web page
-	if ((len>14) && strncmp(pdata,"GET / HTTP/1.1",14)==0) {
-		os_printf("Respond webpage ... %d\n", ++count);
-		char buffer[1000];
-		int len;
-		os_sprintf(buffer,"HTTP/1.0 200 OK\r\nServer: ESPsrv\r\nContent-Type: text/html\r\n\r\n<h1>ESP8266 Web Server</h1>\r\n%d",count);
-		len = strlen(buffer);
-		struct espconn *conn = (struct espconn *)arg;
-		connsend.type = ESPCONN_TCP;
-		connsend.state = ESPCONN_NONE;
-		connsend.proto.tcp = &tcpsend;
-		tcpsend.remote_ip[3] = conn->proto.tcp->remote_ip[3];
-		tcpsend.remote_ip[2] = conn->proto.tcp->remote_ip[2];
-		tcpsend.remote_ip[1] = conn->proto.tcp->remote_ip[1];
-		tcpsend.remote_ip[0] = conn->proto.tcp->remote_ip[0];
-		tcpsend.remote_port = conn->proto.tcp->remote_port;
-		//espconn_regist_sentcb(&connsend, sent_cb);
-		espconn_sent(&connsend,buffer,len);
-		//espconn_delete(&connsend);
-		os_printf(" ... sending\n");
-	}
+   //received some data from tcp connection
+    
+   struct espconn *pespconn = arg;
+   os_printf("tcp recv : %s \r\n", pusrdata);
+    
+   char pbuf[1000];
+   os_sprintf(pbuf,
+     "HTTP/1.0 200 OK\n\rServer: ESPsrv\n\rContent-Type: text/html\n\r\n\r<!DOCTYPE HTML>\n\r"
+	 "<html>\n\r<h1>ESP8266 Web Server</h1>\n\r%d"
+     "<form>Length = <input name=\"length\"/>\r\nRED = <input name=\"red\"/>\r\nGREEN = <input name=\"green\"/>\r\nBLUE = <input name=\"blue\"/>\r\n"
+	 "<input type=\"Submit\" value=\"Set\"/></form>\n\r"
+	 "<form><br>Relay state:<br/>New State:<input type=\"Submit\" name=\"relay\" Value=\"A\"/><input type=\"Submit\" name=\"relay\" Value=\"B\"/></form>"
+	 "</html>\n",++counter);
+   espconn_sent(pespconn, pbuf, os_strlen(pbuf));
+   espconn_disconnect(pespconn);    
 }
+ 
+/******************************************************************************
+ * FunctionName : tcp_server_discon_cb
+ * Description  : disconnect callback.
+ * Parameters   : arg -- Additional argument to pass to the callback function
+ * Returns      : none
+*******************************************************************************/
+LOCAL void ICACHE_FLASH_ATTR
+tcp_server_discon_cb(void *arg)
+{
+   //tcp disconnect successfully
+    
+    os_printf("tcp disconnect succeed !!! \r\n");
+}
+ 
+/******************************************************************************
+ * FunctionName : tcp_server_recon_cb
+ * Description  : reconnect callback, error occured in TCP connection.
+ * Parameters   : arg -- Additional argument to pass to the callback function
+ * Returns      : none
+*******************************************************************************/
+LOCAL void ICACHE_FLASH_ATTR
+tcp_server_recon_cb(void *arg, sint8 err)
+{
+   //error occured , tcp connection broke. 
+    
+    os_printf("reconnect callback, error code %d !!! \r\n",err);
+}
+ 
+LOCAL void tcp_server_multi_send(void)
+{
+   struct espconn *pesp_conn = &esp_conn;
+ 
+   remot_info *premot = NULL;
+   uint8 count = 0;
+   sint8 value = ESPCONN_OK;
+   if (espconn_get_connection_info(pesp_conn,&premot,0) == ESPCONN_OK){
+ 	  os_printf("link_cnt=%d\n\r",pesp_conn->link_cnt);
+//      char pbuf[1000];
+//	  os_sprintf(pbuf,
+//	     "HTTP/1.0 200 OK\r\nServer: ESPsrv\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE HT// ML>\r\n"
+//		 "<html>\r\n<h1>ESP8266 Web Server</h1>\r\n%d"
+//	     "<form>LED period: <input name=\"period\"/>msec<input type=\"Submit\" value=\"Set\"/></form>"
+//		 "<form>Relay state:<br/>New State:<input type=\"Submit\" name=\"relay\" Value=\"A\"/><input type=\"Submit\" name=\"relay\" Value=\"B\"/></form>"
+//		 "</html>\n",++counter);
+//      for (count = 0; count < pesp_conn->link_cnt; count ++){
+//         pesp_conn->proto.tcp->remote_port = premot[count].remote_port;          
+//         pesp_conn->proto.tcp->remote_ip[0] = premot[count].remote_ip[0];
+//         pesp_conn->proto.tcp->remote_ip[1] = premot[count].remote_ip[1];
+//         pesp_conn->proto.tcp->remote_ip[2] = premot[count].remote_ip[2];
+//         pesp_conn->proto.tcp->remote_ip[3] = premot[count].remote_ip[3];
+ 
+//         espconn_sent(pesp_conn, pbuf, os_strlen(pbuf));
+//		 espconn_disconnect(pesp_conn);
+//      }
+   }
+}
+ 
+ 
+/******************************************************************************
+ * FunctionName : tcp_server_listen
+ * Description  : TCP server listened a connection successfully
+ * Parameters   : arg -- Additional argument to pass to the callback function
+ * Returns      : none
+*******************************************************************************/
+LOCAL void ICACHE_FLASH_ATTR
+tcp_server_listen(void *arg)
+{
+    struct espconn *pesp_conn = arg;
+    os_printf("tcp_server_listen !!! \r\n");
+ 
+    espconn_regist_recvcb(pesp_conn, tcp_server_recv_cb);
+    espconn_regist_reconcb(pesp_conn, tcp_server_recon_cb);
+    espconn_regist_disconcb(pesp_conn, tcp_server_discon_cb);
+     
+    espconn_regist_sentcb(pesp_conn, tcp_server_sent_cb);
+   tcp_server_multi_send();
+}
+ 
+/******************************************************************************
+ * FunctionName : user_tcpserver_init
+ * Description  : parameter initialize as a TCP server
+ * Parameters   : port -- server port
+ * Returns      : none
+*******************************************************************************/
+void ICACHE_FLASH_ATTR
+user_tcpserver_init(uint32 port)
+{
+    esp_conn.type = ESPCONN_TCP;
+    esp_conn.state = ESPCONN_NONE;
+    esp_conn.proto.tcp = &esptcp;
+    esp_conn.proto.tcp->local_port = port;
+    espconn_regist_connectcb(&esp_conn, tcp_server_listen);
+ 
+    sint8 ret = espconn_accept(&esp_conn);
+     
+    os_printf("espconn_accept [%d] !!! \r\n", ret);
+ 
+}
+LOCAL os_timer_t test_timer;
+ 
+/******************************************************************************
+ * FunctionName : user_esp_platform_check_ip
+ * Description  : check whether get ip addr or not
+ * Parameters   : none
+ * Returns      : none
+*******************************************************************************/
+void ICACHE_FLASH_ATTR
+user_esp_platform_check_ip(void)
+{
+    struct ip_info ipconfig;
+ 
+   //disarm timer first
+    os_timer_disarm(&test_timer);
+ 
+   //get ip info of ESP8266 station
+    wifi_get_ip_info(STATION_IF, &ipconfig);
+ 
+    if (wifi_station_get_connect_status() == STATION_GOT_IP && ipconfig.ip.addr != 0) {
+ 
+      os_printf("got ip !!! \r\n");
+      user_tcpserver_init(SERVER_LOCAL_PORT);
+ 
+    } else {
+        
+        if ((wifi_station_get_connect_status() == STATION_WRONG_PASSWORD ||
+                wifi_station_get_connect_status() == STATION_NO_AP_FOUND ||
+                wifi_station_get_connect_status() == STATION_CONNECT_FAIL)) {
+                 
+         os_printf("connect fail !!! \r\n");
+          
+        } else {
+           //re-arm timer to check ip
+            os_timer_setfn(&test_timer, (os_timer_func_t *)user_esp_platform_check_ip, NULL);
+            os_timer_arm(&test_timer, 100, 0);
+        }
+    }
+}
+ 
+/******************************************************************************
+ * FunctionName : user_set_station_config
+ * Description  : set the router info which ESP8266 station will connect to 
+ * Parameters   : none
+ * Returns      : none
+*******************************************************************************/
+void ICACHE_FLASH_ATTR
+user_set_station_config(void)
+{
+   // Wifi configuration 
+   char ssid[32] = SSID; 
+   char password[64] = PASSWORD; 
+   struct station_config stationConf; 
+ 
+   //Set  station mode 
+   //wifi_set_opmode(STATIONAP_MODE); 
+   wifi_set_opmode_current(STATION_MODE); 
+   wifi_station_set_hostname("ESP");
 
+   //need not mac address
+   stationConf.bssid_set = 0; 
+    
+   //Set ap settings 
+   os_memcpy(&stationConf.ssid, ssid, 32); 
+   os_memcpy(&stationConf.password, password, 64); 
+   wifi_station_set_config(&stationConf); 
+   wifi_station_connect();
+ 
+   //set a timer to check whether got ip from router succeed or not.
+   os_timer_disarm(&test_timer);
+   os_timer_setfn(&test_timer, (os_timer_func_t *)user_esp_platform_check_ip, NULL);
+   os_timer_arm(&test_timer, 100, 0);
+ 
+}
+ 
 void user_rf_pre_init(void) 
 {
 }
 
-//Init function 
-void ICACHE_FLASH_ATTR
-user_init()
+/******************************************************************************
+ * FunctionName : user_init
+ * Description  : entry of user application, init user function here
+ * Parameters   : none
+ * Returns      : none
+*******************************************************************************/
+void user_init(void)
 {
 	// Set USB baud rate
     uart_div_modify( 0, UART_CLK_FREQ / ( 115200 ) );
-	// Turn on WIFI
-	wifi_set_sleep_type(NONE_SLEEP_T);
-	// Turn off WIFI auto connect 
-	wifi_station_set_auto_connect(0);
-	// Set Callback function after system init
-	system_init_done_cb(init_done_cb);
+    os_printf("SDK version:%s\n", system_get_sdk_version());
+    
+	system_init_done_cb(user_set_station_config);
+
+   //Set  station mode 
+   //wifi_set_opmode(STATIONAP_MODE); 
+   //--wifi_set_opmode_current(STATION_MODE); 
+   //--wifi_station_set_hostname("ESP");
+ 
+   // ESP8266 connect to router.
+   //--user_set_station_config();
+    
 }
-
-void blink_led (int count) {
-	while (count>0) {
-	    gpio_output_set(0, BIT2, BIT2, 0);
-		os_delay_us(50000);
-	    gpio_output_set(BIT2, 0, BIT2, 0);
-		if (--count>0) {
-			os_delay_us(50000);
-		}
-	}
-}
-
-
